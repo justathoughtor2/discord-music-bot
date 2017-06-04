@@ -1,22 +1,40 @@
-				////////////////////////////////////////////////////////////////////////////////   
-				//    This program is free software: you can redistribute it and/or modify    //   
-				//    it under the terms of the GNU General Public License as published by    //   
-				//    the Free Software Foundation, either version 3 of the License, or       //   
-				//    (at your option) any later version.                                     //   
-				//                                                                            //   
-				//    This program is distributed in the hope that it will be useful,         //   
-				//    but WITHOUT ANY WARRANTY; without even the implied warranty of          //   
-				//    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           //   
-				//    GNU General Public License for more details.                            //   
-				//                                                                            //   
-				//    You should have received a copy of the GNU General Public License       //   
-				//    along with this program.  If not, see <http://www.gnu.org/licenses/>.   //   
+				////////////////////////////////////////////////////////////////////////////////
+				//    This program is free software: you can redistribute it and/or modify    //
+				//    it under the terms of the GNU General Public License as published by    //
+				//    the Free Software Foundation, either version 3 of the License, or       //
+				//    (at your option) any later version.                                     //
+				//                                                                            //
+				//    This program is distributed in the hope that it will be useful,         //
+				//    but WITHOUT ANY WARRANTY; without even the implied warranty of          //
+				//    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           //
+				//    GNU General Public License for more details.                            //
+				//                                                                            //
+				//    You should have received a copy of the GNU General Public License       //
+				//    along with this program.  If not, see <http://www.gnu.org/licenses/>.   //
 				////////////////////////////////////////////////////////////////////////////////
 
 const Discord = require("discord.js");
 const fs = require("fs");
 const ytdl = require("ytdl-core");
 const request = require("request");
+var record = require('node-record-lpcm16')
+var Detector = require('snowboy').Detector
+var Models = require('snowboy').Models
+var models = new Models()
+models.add({
+  file: '/home/thoug/hey-discord.pmdl',
+  sensitivity: '0.5',
+  hotwords : 'hey discord'
+})
+var detector = new Detector({
+  resource: '/home/thoug/common.res',
+  models: models,
+  audioGain: 1.0
+})
+var speech = require('@google-cloud/speech')({
+  projectId: 'psychic-binder-115302',
+  keyFilename: '/home/thoug/keyfile.json'
+})
 
 const bot = new Discord.Client({autoReconnect: true, max_message_cache: 0});
 
@@ -59,7 +77,7 @@ var commands = [
 			}
 		}
 	},
-	
+
 	{
 		command: "resume",
 		description: "Resumes playlist",
@@ -145,7 +163,7 @@ var commands = [
 			} else {
 				var response = "Sorry?";
 			}
-			
+
 			message.reply(response);
 		}
 	},
@@ -156,18 +174,18 @@ var commands = [
 		parameters: [],
 		execute: function(message, params) {
 			var response = "Available commands:";
-			
+
 			for(var i = 0; i < commands.length; i++) {
 				var c = commands[i];
 				response += "\n!" + c.command;
-				
+
 				for(var j = 0; j < c.parameters.length; j++) {
 					response += " <" + c.parameters[j] + ">";
 				}
-				
+
 				response += ": " + c.description;
 			}
-			
+
 			message.reply(response);
 		}
 	},
@@ -192,7 +210,7 @@ var commands = [
 		parameters: [],
 		execute: function(message, params) {
 			var response = "";
-	
+
 			if(is_queue_empty()) {
 				response = "the queue is empty.";
 			} else {
@@ -203,7 +221,7 @@ var commands = [
 
 				if(long_queue) response += "\n**...and " + (queue.length - 30) + " more.**";
 			}
-			
+
 			message.reply(response);
 		}
 	},
@@ -244,7 +262,7 @@ var commands = [
 			message.reply('Request "' + deleted[0].title +'" was removed from the queue.');
 		}
 	},
-	
+
 	{
 		command: "aliases",
 		description: "Displays the stored aliases",
@@ -252,17 +270,17 @@ var commands = [
 		execute: function(message, params) {
 
 			var response = "Current aliases:";
-			
+
 			for(var alias in aliases) {
 				if(aliases.hasOwnProperty(alias)) {
 					response += "\n" + alias + " -> " + aliases[alias];
 				}
 			}
-			
+
 			message.reply(response);
 		}
 	},
-	
+
 	{
 		command: "setalias",
 		description: "Sets an alias, overriding the previous one if it already exists",
@@ -271,14 +289,14 @@ var commands = [
 
 			var alias = params[1].toLowerCase();
 			var val = params[2];
-			
+
 			aliases[alias] = val;
 			fs.writeFileSync(aliases_file_path, JSON.stringify(aliases));
-			
+
 			message.reply("Alias " + alias + " -> " + val + " set successfully.");
 		}
 	},
-	
+
 	{
 		command: "deletealias",
 		description: "Deletes an existing alias",
@@ -317,7 +335,7 @@ var commands = [
 			});
 		}
 	},
-  
+
   {
     command: "setavatar",
 		description: "Set bot avatar, overriding the previous one if it already exists",
@@ -334,7 +352,7 @@ var commands = [
 			})
 			.catch((err) => {
 				message.reply('Error: Unable to set avatar');
-				console.log('Error on setavatar command:', err); 
+				console.log('Error on setavatar command:', err);
       });
 		}
   }
@@ -468,6 +486,19 @@ function search_video(message, query) {
 	})
 }
 
+function search(query) {
+	request("https://www.googleapis.com/youtube/v3/search?part=id&type=video&q=" + encodeURIComponent(query) + "&key=" + yt_api_key, (error, response, body) => {
+		var json = JSON.parse(body);
+		if("error" in json) {
+			console.log("An error has occurred: " + json.error.errors[0].message + " - " + json.error.errors[0].reason);
+		} else if(json.items.length === 0) {
+			message.reply("No videos found matching the search criteria.");
+		} else {
+			add_to_queue(json.items[0].id.videoId, message);
+		}
+	})
+}
+
 function queue_playlist(playlistId, message, pageToken = '') {
 	request("https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId=" + playlistId + "&key=" + yt_api_key + "&pageToken=" + pageToken, (error, response, body) => {
 		var json = JSON.parse(body);
@@ -516,11 +547,39 @@ exports.run = function(server_name, text_channel_name, voice_channel_name, alias
 
 		var voice_channel = server.channels.find(chn => chn.name === voice_channel_name && chn.type === "voice"); //The voice channel the bot will connect to
 		if(voice_channel === null) throw "Couldn't find voice channel '" + voice_channel_name + "' in server '" + server_name + "'";
-		
+
 		text_channel = server.channels.find(chn => chn.name === text_channel_name && chn.type === "text"); //The text channel the bot will use to announce stuff
 		if(text_channel === null) throw "Couldn't find text channel '#" + text_channel_name + "' in server '" + server_name + "'";
 
 		voice_channel.join().then(connection => {voice_connection = connection;}).catch(console.error);
+
+		receiver.on('opus', (user, buffer) => {
+		  detector.on('hotword', function (index, hotword, buffer) { // Buffer arguments contains sound that triggered the event, for example, it could be written to a wav stream
+		    console.log('hotword', index, hotword)
+		    Logger.info('hotword', index, hotword)
+		    record.start({
+		      threshold: 0,
+		      verbose: true
+		    }).pipe(file)
+		    setTimeout(function () {
+		      record.stop()
+		      speech.recognize(file, config, (err, transcript, apiResponse) => {
+		        if(err) {
+		          console.log('Did not work...')
+		        }
+		        else {
+		          if(transcript.match(/^search/).length > 0) {
+								if(yt_api_key === null) {
+									text_channel.send("You need a YouTube API key in order to use the !search command. Please see https://github.com/agubelu/discord-music-bot#obtaining-a-youtube-api-key");
+								} else {
+									text_channel.send('!' + transcript.trim())
+								}
+		          }
+		        }
+		      })
+		    }, 6000)
+		  })
+		})
 
 		fs.access(aliases_file_path, fs.F_OK, (err) => {
 			if(err) {
